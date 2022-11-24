@@ -11,6 +11,16 @@
 #include <iostream>
 
 #define SERVER_PORT 1234
+#define RESPONSE_HEADER                                                       \
+	"HTTP/1.1 404 Not Found\ncontent-encoding: gzip\ncontent-type: "          \
+	"text/html; charset=utf-8\ndate: Thu, 24 Nov 2022 10:43:12 GMT\nserver: " \
+	"nginx\nstatus: 404 Not Found\nvary: Accept-Encoding\nvary: "             \
+	"Origin,Accept-Encoding\nx-rack-cors: preflight-hit; "                    \
+	"no-origin\r\n\r\n<!DOCTYPE html><html><head><title>The page you were "   \
+	"looking "                                                                \
+	"for doesn't exist (404)</title><style>h1{font-weight: normal; "          \
+	"margin: 50px auto;}</style></head><body><h1>Seems like your page "       \
+	"doesn't exist anymore !</h1><script></script></body></html>"
 
 void error_exit( std::string err, int ( *func )( int ), int fd ) {
 	if ( func != NULL ) {
@@ -62,9 +72,12 @@ int main() {
 		error_exit( "bind", close, listen_sd );
 	}
 
-	if ( listen( listen_sd, 8 ) == -1 ) {
+	if ( listen( listen_sd, 10 ) == -1 ) {
 		error_exit( "listen", NULL, 0 );
 	}
+
+	// sleep( 20 );
+	// std::cout << "sleep" << std::endl;
 
 	struct timespec timeout;
 	timeout.tv_sec = 10;
@@ -159,8 +172,11 @@ int main() {
 								   -1 ) ) {
 							std::cerr << "client write error!" << std::endl;
 							disconnect_client( curr_event->ident, clients );
-						} else
+						} else {
+							write( curr_event->ident, RESPONSE_HEADER,
+								   strlen( RESPONSE_HEADER ) );
 							clients[curr_event->ident].clear();
+						}
 					}
 				}
 			}
