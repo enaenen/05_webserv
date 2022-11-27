@@ -37,6 +37,8 @@ void disconnect_client( int                               client_fd,
 	clients.erase( client_fd );
 }
 
+std::string getNextCRLF( uintptr_t fd );
+
 int main( void ) {
 	int                serv_sd;
 	struct sockaddr_in serv_addr;
@@ -84,29 +86,30 @@ int main( void ) {
 						   0, 0, NULL );
 
 	int            event_len;
-	struct kevent *cur_evnet;
+	struct kevent *cur_event;
+	int            l = 0;
 	while ( true ) {
 		event_len = kevent( kq, changelist.begin().base(), changelist.size(),
 							eventlist, 8, NULL );
-
 		if ( event_len == -1 ) {
 			error_exit( "kevent()", close, serv_sd );
 		}
-
 		changelist.clear();
 
-		for ( int i = 0; i < event_len; ++i ) {
-			cur_evnet = &eventlist[i];
+		// std::cout << "current loop: " << l++ << std::endl;
 
-			if ( cur_evnet->flags & EV_ERROR ) {
-				if ( cur_evnet->ident == serv_sd ) {
+		for ( int i = 0; i < event_len; ++i ) {
+			cur_event = &eventlist[i];
+
+			if ( cur_event->flags & EV_ERROR ) {
+				if ( cur_event->ident == serv_sd ) {
 					error_exit( "server socket error", close, serv_sd );
 				} else {
 					std::cerr << "client socket error" << std::endl;
-					disconnect_client( cur_evnet->ident, clients );
+					disconnect_client( cur_event->ident, clients );
 				}
-			} else if ( cur_evnet->filter == EVFILT_READ ) {
-				if ( cur_evnet->ident == serv_sd ) {
+			} else if ( cur_event->filter == EVFILT_READ ) {
+				if ( cur_event->ident == serv_sd ) {
 					uintptr_t client_fd;
 					if ( ( client_fd = accept( serv_sd, NULL, NULL ) ) == -1 ) {
 						std::cerr << strerror( errno ) << std::endl;
@@ -117,32 +120,88 @@ int main( void ) {
 						add_event_change_list( changelist, client_fd,
 											   EVFILT_READ, EV_ADD | EV_ENABLE,
 											   0, 0, NULL );
-						add_event_change_list( changelist, client_fd,
-											   EVFILT_WRITE, EV_ADD | EV_ENABLE,
-											   0, 0, NULL );
+						add_event_change_list(
+							changelist, client_fd, EVFILT_WRITE,
+							EV_ADD | EV_DISABLE, 0, 0, NULL );
 						clients[client_fd] = "";
 					};
 				} else {
-					char buf[1025];
-					int  n = read( cur_evnet->ident, buf, sizeof( buf ) - 1 );
+					// char buf[1024];
+					// int  n = read( cur_event->ident, buf, sizeof( buf ) );
 
-					buf[n] = '\n';
-					clients[cur_evnet->ident] += buf;
-					std::cout << "received data from " << cur_evnet->ident
-							  << std::endl;
+					std::cout << "recieved data from " << cur_event->ident
+							  << ":" << std::endl;
+					std::string new_line = getNextCRLF( cur_event->ident );
+					std::cout << new_line << std::endl;
+					while ( new_line != "" ) {
+						new_line = getNextCRLF( cur_event->ident );
+						std::cout << new_line << std::endl;
+						// std::cerr << "client read error!" << std::endl;
+						// disconnect_client( cur_event->ident, clients );
+					}
+					add_event_change_list( changelist, cur_event->ident,
+										   EVFILT_WRITE, EV_ADD | EV_ENABLE, 0,
+										   0, NULL );
 				}
-			} else if ( cur_evnet->filter == EVFILT_WRITE ) {
-				std::map<uintptr_t, std::string>::iterator iter =
-					clients.find( cur_evnet->ident );
-				// if ( iter != clients.end() ) {
-				// 	if ( clients[cur_evnet->ident] != "" ) {
-				// 		int n;
-				// 	}
-				// }
-				write( cur_evnet->ident, "ok", 2 );
-				sleep( 1 );
+			} else if ( cur_event->filter == EVFILT_WRITE ) {
+				// std::map<uintptr_t, std::string>::iterator iter =
+				// 	clients.find( cur_event->ident );
+				std::cout << "sending response" << std::endl;
+				clients[cur_event->ident].clear();
+
+				write( cur_event->ident, "ok", 2 );
+				// If sending data is finished, write event should be disabled.
+				// add_event_change_list( changelist, cur_event->ident,
+				// EVFILT_READ, 					   EV_ENABLE, 0, 0, NULL );
+				// add_event_change_list( changelist, cur_event->ident,
+				// EVFILT_WRITE, EV_DISABLE, 0, 0, NULL );
+				add_event_change_list( changelist, cur_event->ident,
+									   EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0,
+									   NULL );
+				std::cout << "sending response end" << std::endl;
 			}
 		}
 	}
 	return 0;
 }
+
+// class getHttpHeader {
+// }
+
+struct header_buffer {
+	std::string saved;
+	size_t      no_crlf_to;
+};
+
+std::string getNextCRLF( uintptr_t fd ) {
+	static struct header_buffer buf[1000000];
+	char                        strbuf[1024];
+	ssize_t                     n;
+	int                         pos;
+
+	if ( buf[fd].saved.size() > buf[fd].no_crlf_to ) {
+		pos = buf[fd].saved.find( "\r\n" );
+		if ( pos != std::string::npos ) {
+			std::string tmp = buf[fd].saved.substr( buf[fd].no_crlf_to, pos );
+			buf[fd].no_crlf_to = pos + 2;
+			return tmp;
+		}
+		if ( *buf[fd].saved.rbegin() == '\r' ) {
+			buf[fd].no_crlf_to = buf[fd].saved.size() - 2;
+		} else {
+			buf[fd].no_crlf_to = buf[fd].saved.size() - 1;
+		}
+	}
+	n = read( fd, strbuf, 1024 );
+	if ( n < 0 ) {
+		return "";
+	} else if ( n == 0 ) {
+		return "";
+	}
+	buf[fd].saved.append( strbuf, buf[fd].saved.size(), n );
+	return getNextCRLF( fd );
+}
+
+// char **str_split(std::string &orgin, char *delim) {
+
+// }

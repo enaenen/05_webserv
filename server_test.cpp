@@ -163,7 +163,7 @@ int main() {
 							std::cerr << "client write error!" << std::endl;
 							disconnect_client( curr_event->ident, clients );
 						} else {
-							write( curr_event->ident, "ok", strlen( "ok" ) );
+							// write( curr_event->ident, "ok", strlen( "ok" ) );
 							clients[curr_event->ident].clear();
 						}
 					}

@@ -40,11 +40,14 @@ int main( int argc, char **argv ) {
 
 	while ( 1 ) {
 		/* 메시지 입력 전송*/
-		fputs( "전송할 메시지를 입력하세요(q to quit) : ", stdout );
-		fgets( message, BUFSIZE, stdin );
-		if ( !strcmp( message, "q\n" ) ) {
-			break;
-		}
+		// fputs( "전송할 메시지를 입력하세요(q to quit) : ", stdout );
+		// fgets( message, BUFSIZE, stdin );
+		// if ( !strcmp( message, "q\n" ) ) {
+		// 	break;
+		// }
+		char *message =
+			"GET / HTTP/1.1\r\nHost: localhost:1234\r\nUser-Agent: "
+			"Go-http-client/1.1\r\nAccept-Encoding: gzip\r\n\r\n";
 		write( sock, message, strlen( message ) );
 
 		/* 메시지 수신 출력 */
