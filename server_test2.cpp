@@ -2,6 +2,7 @@
 #include <sys/event.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/uio.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
@@ -13,6 +14,9 @@
 
 #define SERV_PORT 1234
 #define SERV_SOCK_BACKLOG 10
+#define SERV_RESPONSE                                                    \
+	"HTTP/1.1 200 KO\r\nContent-Type: text/plain\r\nTransfer-Encoding: " \
+	"chunked\r\n\r\n4\r\nghan\r\n6\r\njiskim\r\n8\r\nyongjule\r\n0\r\n\r\n"
 
 void error_exit( std::string err, int ( *func )( int ), int fd ) {
 	std::cerr << strerror( errno ) << std::endl;
@@ -131,14 +135,12 @@ int main( void ) {
 
 					std::cout << "recieved data from " << cur_event->ident
 							  << ":" << std::endl;
-					std::string new_line = getNextCRLF( cur_event->ident );
-					std::cout << new_line << std::endl;
-					while ( new_line != "" ) {
+					std::string new_line;
+					do {
 						new_line = getNextCRLF( cur_event->ident );
 						std::cout << new_line << std::endl;
-						// std::cerr << "client read error!" << std::endl;
-						// disconnect_client( cur_event->ident, clients );
-					}
+					} while ( new_line != "" );
+
 					add_event_change_list( changelist, cur_event->ident,
 										   EVFILT_WRITE, EV_ADD | EV_ENABLE, 0,
 										   0, NULL );
@@ -149,7 +151,8 @@ int main( void ) {
 				std::cout << "sending response" << std::endl;
 				clients[cur_event->ident].clear();
 
-				write( cur_event->ident, "ok", 2 );
+				write( cur_event->ident, SERV_RESPONSE,
+					   strlen( SERV_RESPONSE ) );
 				// If sending data is finished, write event should be disabled.
 				// add_event_change_list( changelist, cur_event->ident,
 				// EVFILT_READ, 					   EV_ENABLE, 0, 0, NULL );
@@ -168,37 +171,80 @@ int main( void ) {
 // class getHttpHeader {
 // }
 
-struct header_buffer {
-	std::string saved;
-	size_t      no_crlf_to;
-};
+// struct header_buffer {
+// 	std::string saved;
+// 	size_t      read;
+// 	size_t      no_crlf_to;
+// };
+
+// std::string getNextCRLF( uintptr_t fd ) {
+// 	static struct header_buffer buf[1000000];
+// 	char                        strbuf[1024];
+// 	ssize_t                     n;
+// 	int                         pos;
+
+// 	if ( buf[fd].saved.size() &&
+// 		 buf[fd].saved.size() - 1 > buf[fd].no_crlf_to ) {
+// 		pos = buf[fd].saved.find( "\r\n" );
+// 		if ( pos != std::string::npos ) {
+// 			std::string tmp = buf[fd].saved.substr( buf[fd].no_crlf_to, pos );
+// 			buf[fd].no_crlf_to = pos + 2;
+// 			return tmp;
+// 		}
+// 		buf[fd].no_crlf_to = buf[fd].saved.size() - 2;
+// 	}
+// 	n = read( fd, strbuf, 1024 );
+// 	if ( n <= 0 ) {
+// 		std::string tmp = buf[fd].saved.substr( buf[fd].no_crlf_to, pos );
+// 		buf[fd].saved.clear();
+// 		return "";
+// 	} else if ( n == 0 ) {
+// 		buf[fd].saved.clear();
+// 		return "";
+// 	}
+// 	buf[fd].saved.append( strbuf, buf[fd].saved.size(), n );
+// 	return getNextCRLF( fd );
+// }
+
+std::string getHeader( uintptr_t fd, std::string &body ) {
+	char    strbuf[10000];
+	ssize_t n;
+	size_t  pos;
+
+	n = read( fd, strbuf, 10000 );
+	if ( n < 0 ) {
+		std::cerr << "client error: " << fd << std::endl;
+		close( fd );
+	} else if ( n == 0 ) {
+	}
+}
 
 std::string getNextCRLF( uintptr_t fd ) {
-	static struct header_buffer buf[1000000];
-	char                        strbuf[1024];
-	ssize_t                     n;
-	int                         pos;
+	static std::string buf[1000000];
+	char               strbuf[1024];
+	ssize_t            n;
+	size_t             pos;
 
-	if ( buf[fd].saved.size() > buf[fd].no_crlf_to ) {
-		pos = buf[fd].saved.find( "\r\n" );
+	if ( buf[fd].size() ) {
+		// header part
+		pos = buf[fd].find( "\r\n\r\n" );
 		if ( pos != std::string::npos ) {
-			std::string tmp = buf[fd].saved.substr( buf[fd].no_crlf_to, pos );
-			buf[fd].no_crlf_to = pos + 2;
+			std::string tmp = buf[fd].substr( 0, pos );
+			buf[fd].erase( 0, pos + 2 );
 			return tmp;
-		}
-		if ( *buf[fd].saved.rbegin() == '\r' ) {
-			buf[fd].no_crlf_to = buf[fd].saved.size() - 2;
-		} else {
-			buf[fd].no_crlf_to = buf[fd].saved.size() - 1;
 		}
 	}
 	n = read( fd, strbuf, 1024 );
-	if ( n < 0 ) {
-		return "";
-	} else if ( n == 0 ) {
-		return "";
+	if ( n <= 0 ) {
+		if ( n < 0 ) {
+			return "";
+		} else {
+			std::string tmp = buf[fd];
+			buf[fd].clear();
+			return tmp;
+		}
 	}
-	buf[fd].saved.append( strbuf, buf[fd].saved.size(), n );
+	buf[fd].append( strbuf, buf[fd].size(), n );
 	return getNextCRLF( fd );
 }
 
