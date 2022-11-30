@@ -133,7 +133,7 @@ int main() {
 				} else if ( clients.find( curr_event->ident ) !=
 							clients.end() ) {
 					/* read data from client */
-					char buf[1024];
+					char buf[10];
 					int  n = read( curr_event->ident, buf, sizeof( buf ) );
 
 					if ( n <= 0 ) {
@@ -153,6 +153,8 @@ int main() {
 				/* send data to client */
 				std::map<int, std::string>::iterator it =
 					clients.find( curr_event->ident );
+				std::cout << "write" << std::endl;
+				usleep( 500000 );
 				if ( it != clients.end() ) {
 					if ( clients[curr_event->ident] != "" ) {
 						int n;

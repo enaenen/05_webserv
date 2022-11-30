@@ -17,6 +17,7 @@
 #define SERV_RESPONSE                                                    \
 	"HTTP/1.1 200 KO\r\nContent-Type: text/plain\r\nTransfer-Encoding: " \
 	"chunked\r\n\r\n4\r\nghan\r\n6\r\njiskim\r\n8\r\nyongjule\r\n0\r\n\r\n"
+#define READ_BUF_SIZE 8 * 1024
 
 void error_exit( std::string err, int ( *func )( int ), int fd ) {
 	std::cerr << strerror( errno ) << std::endl;
@@ -215,7 +216,7 @@ std::string getHeader( uintptr_t fd, std::string &body ) {
 	if ( n < 0 ) {
 		std::cerr << "client error: " << fd << std::endl;
 		close( fd );
-	} else if ( n == 0 ) {
+		return "";
 	}
 }
 
