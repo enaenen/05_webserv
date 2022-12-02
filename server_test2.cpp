@@ -42,7 +42,47 @@ void disconnect_client( int                               client_fd,
 	clients.erase( client_fd );
 }
 
-std::string getNextCRLF( uintptr_t fd );
+typedef class headerInfo {
+   public:
+	char                               rbuf[READ_BUF_SIZE];
+	std::string                        rsaved;
+	int                                rchecked;
+	char                               wbuf[READ_BUF_SIZE];
+	std::string                        wsaved;
+	int                                wchecked;
+	timespec                           timeout;
+	int                                flag;
+	std::map<std::string, std::string> field;
+} t_header;
+
+std::string getNextCRLF( t_header & ) {
+	static std::string buf[1000000];
+	char               strbuf[8196];
+	ssize_t            n;
+	size_t             pos;
+
+	if ( buf[fd].size() ) {
+		// header part
+		pos = buf[fd].find( "\r\n\r\n" );
+		if ( pos != std::string::npos ) {
+			std::string tmp = buf[fd].substr( 0, pos );
+			buf[fd].erase( 0, pos + 2 );
+			return tmp;
+		}
+	}
+	n = read( fd, strbuf, 1024 );
+	if ( n <= 0 ) {
+		if ( n < 0 ) {
+			return "";
+		} else {
+			std::string tmp = buf[fd];
+			buf[fd].clear();
+			return tmp;
+		}
+	}
+	buf[fd].append( strbuf, buf[fd].size(), n );
+	return getNextCRLF( fd );
+}
 
 int main( void ) {
 	int                serv_sd;
@@ -77,10 +117,10 @@ int main( void ) {
 		error_exit( "bind", close, serv_sd );
 	}
 
-	std::map<uintptr_t, std::string> clients;
-	std::vector<struct kevent>       changelist;
-	struct kevent                    eventlist[8];
-	int                              kq;
+	std::map<uintptr_t, t_header> clients;
+	std::vector<struct kevent>    changelist;
+	struct kevent                 eventlist[8];
+	int                           kq;
 
 	kq = kqueue();
 	if ( kq == -1 ) {
@@ -131,11 +171,9 @@ int main( void ) {
 						clients[client_fd] = "";
 					};
 				} else {
-					// char buf[1024];
-					// int  n = read( cur_event->ident, buf, sizeof( buf ) );
-
 					std::cout << "recieved data from " << cur_event->ident
 							  << ":" << std::endl;
+
 					std::string new_line;
 					do {
 						new_line = getNextCRLF( cur_event->ident );
@@ -207,47 +245,18 @@ int main( void ) {
 // 	return getNextCRLF( fd );
 // }
 
-std::string getHeader( uintptr_t fd, std::string &body ) {
-	char    strbuf[10000];
-	ssize_t n;
-	size_t  pos;
+// std::string getHeader( uintptr_t fd, std::string &body ) {
+// 	char    strbuf[10000];
+// 	ssize_t n;
+// 	size_t  pos;
 
-	n = read( fd, strbuf, 10000 );
-	if ( n < 0 ) {
-		std::cerr << "client error: " << fd << std::endl;
-		close( fd );
-		return "";
-	}
-}
-
-std::string getNextCRLF( uintptr_t fd ) {
-	static std::string buf[1000000];
-	char               strbuf[1024];
-	ssize_t            n;
-	size_t             pos;
-
-	if ( buf[fd].size() ) {
-		// header part
-		pos = buf[fd].find( "\r\n\r\n" );
-		if ( pos != std::string::npos ) {
-			std::string tmp = buf[fd].substr( 0, pos );
-			buf[fd].erase( 0, pos + 2 );
-			return tmp;
-		}
-	}
-	n = read( fd, strbuf, 1024 );
-	if ( n <= 0 ) {
-		if ( n < 0 ) {
-			return "";
-		} else {
-			std::string tmp = buf[fd];
-			buf[fd].clear();
-			return tmp;
-		}
-	}
-	buf[fd].append( strbuf, buf[fd].size(), n );
-	return getNextCRLF( fd );
-}
+// 	n = read( fd, strbuf, 10000 );
+// 	if ( n < 0 ) {
+// 		std::cerr << "client error: " << fd << std::endl;
+// 		close( fd );
+// 		return "";
+// 	}
+// }
 
 // char **str_split(std::string &orgin, char *delim) {
 
