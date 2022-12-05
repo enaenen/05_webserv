@@ -19,6 +19,11 @@
 	"chunked\r\n\r\n4\r\nghan\r\n6\r\njiskim\r\n8\r\nyongjule\r\n0\r\n\r\n"
 #define READ_BUF_SIZE 8 * 1024
 
+#define SOCK_READ 1
+#define HEAD_END_FLAG 2
+#define SOCK_WRITE 4
+// #define HEADER_PARED 16
+
 void error_exit( std::string err, int ( *func )( int ), int fd ) {
 	std::cerr << strerror( errno ) << std::endl;
 	if ( func != NULL ) {
@@ -35,15 +40,14 @@ void add_event_change_list( std::vector<struct kevent> &changelist,
 	changelist.push_back( tmp_event );
 }
 
-void disconnect_client( int                               client_fd,
-						std::map<uintptr_t, std::string> &clients ) {
+void disconnect_client( int                                 client_fd,
+						std::map<uintptr_t, t_header_info> &clients ) {
 	std::cout << "client disconnected: " << client_fd << std::endl;
 	close( client_fd );
 	clients.erase( client_fd );
 }
 
-typedef class headerInfo {
-   public:
+typedef struct headerInfo {
 	char                               rbuf[READ_BUF_SIZE];
 	std::string                        rsaved;
 	int                                rchecked;
@@ -53,35 +57,57 @@ typedef class headerInfo {
 	timespec                           timeout;
 	int                                flag;
 	std::map<std::string, std::string> field;
-} t_header;
 
-std::string getNextCRLF( t_header & ) {
-	static std::string buf[1000000];
-	char               strbuf[8196];
-	ssize_t            n;
-	size_t             pos;
+	headerInfo()
+		: rbuf(),
+		  rsaved(),
+		  rchecked( 0 ),
+		  wbuf(),
+		  wsaved(),
+		  wchecked( 0 ),
+		  timeout(),
+		  flag( 0 ),
+		  field() {
+	}
+	~headerInfo() {
+	}
+} t_header_info;
 
-	if ( buf[fd].size() ) {
-		// header part
-		pos = buf[fd].find( "\r\n\r\n" );
+std::string getNextCRLF( uintptr_t fd, t_header_info &buf ) {
+	size_t pos;
+
+	if ( buf.rsaved.size() ) {
+		pos = buf.rsaved.find( "\r\n" );
 		if ( pos != std::string::npos ) {
-			std::string tmp = buf[fd].substr( 0, pos );
-			buf[fd].erase( 0, pos + 2 );
+			std::string tmp = buf.rsaved.substr( buf.rchecked, pos );
+			buf.rchecked = pos + 2;
+			if ( tmp.size() == 0 ) {
+				buf.flag |= HEAD_END_FLAG;
+			}
 			return tmp;
 		}
+		buf.flag |= SOCK_READ;
 	}
-	n = read( fd, strbuf, 1024 );
-	if ( n <= 0 ) {
-		if ( n < 0 ) {
-			return "";
-		} else {
-			std::string tmp = buf[fd];
-			buf[fd].clear();
-			return tmp;
+	return "";
+}
+
+bool read_client_fd( uintptr_t fd, t_header_info &buf ) {
+	char    strbuf[8196];
+	ssize_t n;
+
+	if ( buf.flag & SOCK_READ ) {
+		n = read( fd, strbuf, 1024 );
+		if ( n <= 0 ) {
+			// client error??
+			return false;
 		}
+		buf.rsaved.append( strbuf, buf.rsaved.size(), n );
+		return true;
 	}
-	buf[fd].append( strbuf, buf[fd].size(), n );
-	return getNextCRLF( fd );
+	return true;
+}
+
+bool write_client_fd( uintptr_t fd, t_header_info &buf ) {
 }
 
 int main( void ) {
@@ -99,9 +125,9 @@ int main( void ) {
 		error_exit( "setsockopt()", close, serv_sd );
 	}
 
-	if ( fcntl( serv_sd, F_SETFL, O_NONBLOCK ) == -1 ) {
-		error_exit( "fcntl()", close, serv_sd );
-	}
+	// if ( fcntl( serv_sd, F_SETFL, O_NONBLOCK ) == -1 ) {
+	// 	error_exit( "fcntl()", close, serv_sd );
+	// }
 
 	memset( &serv_addr, 0, sizeof( serv_addr ) );
 	serv_addr.sin_family = AF_INET;
@@ -117,10 +143,10 @@ int main( void ) {
 		error_exit( "bind", close, serv_sd );
 	}
 
-	std::map<uintptr_t, t_header> clients;
-	std::vector<struct kevent>    changelist;
-	struct kevent                 eventlist[8];
-	int                           kq;
+	std::map<uintptr_t, t_header_info> clients;
+	std::vector<struct kevent>         changelist;
+	struct kevent                      eventlist[8];
+	int                                kq;
 
 	kq = kqueue();
 	if ( kq == -1 ) {
@@ -168,7 +194,7 @@ int main( void ) {
 						add_event_change_list(
 							changelist, client_fd, EVFILT_WRITE,
 							EV_ADD | EV_DISABLE, 0, 0, NULL );
-						clients[client_fd] = "";
+						clients[cur_event->ident];
 					};
 				} else {
 					std::cout << "recieved data from " << cur_event->ident
@@ -185,21 +211,25 @@ int main( void ) {
 										   0, NULL );
 				}
 			} else if ( cur_event->filter == EVFILT_WRITE ) {
-				// std::map<uintptr_t, std::string>::iterator iter =
-				// 	clients.find( cur_event->ident );
 				std::cout << "sending response" << std::endl;
-				clients[cur_event->ident].clear();
 
-				write( cur_event->ident, SERV_RESPONSE,
-					   strlen( SERV_RESPONSE ) );
-				// If sending data is finished, write event should be disabled.
-				// add_event_change_list( changelist, cur_event->ident,
-				// EVFILT_READ, 					   EV_ENABLE, 0, 0, NULL );
-				// add_event_change_list( changelist, cur_event->ident,
-				// EVFILT_WRITE, EV_DISABLE, 0, 0, NULL );
-				add_event_change_list( changelist, cur_event->ident,
-									   EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0,
-									   NULL );
+				if ( clients[cur_event->ident].flag & SOCK_WRITE ) {
+					int n;
+					n = write( cur_event->ident,
+							   clients[cur_event->ident].wsaved.c_str(),
+							   clients[cur_event->ident].wsaved.size() );
+					if ( n < 0 ) {
+						// client error
+					} else if ( n > 0 ) {
+					}
+					// write( cur_event->ident, SERV_RESPONSE,
+					// 	   strlen( SERV_RESPONSE ) );
+				}
+				if ( clients[cur_event->ident].flag & SOCK_WRITE == 0 ) {
+					add_event_change_list( changelist, cur_event->ident,
+										   EVFILT_WRITE, EV_ADD | EV_DISABLE, 0,
+										   0, NULL );
+				}
 				std::cout << "sending response end" << std::endl;
 			}
 		}
@@ -226,9 +256,8 @@ int main( void ) {
 // 		 buf[fd].saved.size() - 1 > buf[fd].no_crlf_to ) {
 // 		pos = buf[fd].saved.find( "\r\n" );
 // 		if ( pos != std::string::npos ) {
-// 			std::string tmp = buf[fd].saved.substr( buf[fd].no_crlf_to, pos );
-// 			buf[fd].no_crlf_to = pos + 2;
-// 			return tmp;
+// 			std::string tmp = buf[fd].saved.substr( buf[fd].no_crlf_to, pos
+// ); 			buf[fd].no_crlf_to = pos + 2; 			return tmp;
 // 		}
 // 		buf[fd].no_crlf_to = buf[fd].saved.size() - 2;
 // 	}

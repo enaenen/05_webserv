@@ -6,9 +6,9 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 
-#define BUFSIZE 1024
+#define BUFSIZE 10240
 #define SERV_IP "127.0.0.1"
-#define SERV_PORT 1234
+#define SERV_PORT 80
 
 void error_handling( char *message );
 
@@ -40,15 +40,17 @@ int main( int argc, char **argv ) {
 
 	while ( 1 ) {
 		/* 메시지 입력 전송*/
-		fputs( "전송할 메시지를 입력하세요(q to quit) : ", stdout );
-		fgets( message, BUFSIZE, stdin );
-		if ( !strcmp( message, "q\n" ) ) {
-			break;
-		}
-		// char *message =
-		// 	"GET / HTTP/1.1\r\nHost: localhost:1234\r\nUser-Agent: "
-		// 	"Go-http-client/1.1\r\nAccept-Encoding: gzip\r\n\r\n";
-		write( sock, message, strlen( message ) );
+		// fputs( "전송할 메시지를 입력하세요(q to quit) : ", stdout );
+		// fgets( message, BUFSIZE, stdin );
+		// if ( !strcmp( message, "q\n" ) ) {
+		// 	break;
+		// }
+		sleep( 1 );
+		char *message2 =
+			"HEAD / HTTP/1.1\r\nHost:localhost:1234\r\nUser-Agent: "
+			"Go-http-client/1.1\r\nAccept-Encoding:"
+			"gzip\r\n\r\n";
+		write( sock, message2, strlen( message2 ) );
 
 		/* 메시지 수신 출력 */
 		str_len = read( sock, message, BUFSIZE - 1 );
